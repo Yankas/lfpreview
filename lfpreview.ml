@@ -77,9 +77,14 @@ module Shell = struct
     (** [print_image] prints the image file [file] in the terminal with the size and position given by [position]
         using a compatible terminal or terminal overlay if possible. *)
     let print_image filename pos = 
-        match run (Printf.sprintf "kitty +kitten icat --place %sx%s@%sx%s %s" pos.width pos.height pos.left pos.top filename) with
-        | Error _ -> Error(Printf.sprintf "Couldn't print image file `%s` to terminal" filename)
-        | s ->  Ok("")
+        match Sys.getenv_opt "TERM" with
+        | Some "xterm-kitty" ->
+            begin
+                match run (Printf.sprintf "kitty +kitten icat --place %sx%s@%sx%s %s" pos.width pos.height pos.left pos.top filename) with
+                | Error _ -> Error(Printf.sprintf "Couldn't print image file `%s` to terminal" filename)
+                | s ->  Ok("")
+            end
+        | None | Some _ -> Error("Couldn't display image $TERM is not set")
          
     let run_print cmd = 
         match run_read cmd with
