@@ -76,13 +76,14 @@ module Shell = struct
 
     (** [print_image] prints the image file [file] in the terminal with the size and position given by [position]
         using a compatible terminal or terminal overlay if possible. *)
-    let print_image filename pos = 
+    let print_image filename pos =
         match Sys.getenv_opt "TERM" with
         | Some "xterm-kitty" ->
             begin
-                match run (Printf.sprintf "kitty +kitten icat --place %sx%s@%sx%s %s" pos.width pos.height pos.left pos.top filename) with
+                match run (Printf.sprintf "kitty +icat --silent --transfer-mode file --place %sx%s@%sx%s %s" pos.width pos.height pos.left pos.top filename) with
+                (*match run (Printf.sprintf "kitty +kitten icat --place %sx%s@%sx%s %s" pos.width pos.height pos.left pos.top filename) with *)
                 | Error _ -> Error(Printf.sprintf "Couldn't print image file `%s` to terminal" filename)
-                | s ->  Ok("")
+                | s -> Ok("")
             end
         | None | Some _ -> Error("Couldn't display image $TERM is not set")
          
@@ -93,55 +94,56 @@ module Shell = struct
 end
 
 
-let ( => ) extensions handler = {extensions; handler}
-let file_types = [
-    (* code and text files *)
-    [".xml"; ".sql"; ".ini"; ".csv"; ".cs"; ".yaml"; ".yml"; ".py"; ".rb"; ".lua"; 
-    ".htm"; ".css"; ".html"; ".php"; ".ml"; ".ps"; ".ps1"; ".java"; ".cpp"; ".c"; ".h"; ".ahk"; ".svg";
-    ".tcl"; ".sh"; ".zsh"; ".pl"; ".fs"; ".fsx"; ".js"; ".xsl"; ".sgm"; ".csproj"; ".ent"; ".sgm"; ".vb";
-    ".vbs"; ".txt"; ".tsql"; ".text"; ".sml"; ".bash"; ".rs"; ".qml"; ".mssql"; ".md"; ".go"; ".bat"; "fstab"; 
-    ".zshrc"; ".bashrc"; ".profile"; "profile"; "xprofile"; ".xinitrc"; ".json"]
-    => (fun file _ ->  Shell.run_print ("highlight -O ansi " ^ file));
 
-    (* image files *)
-    [ ".jpg"; ".jpeg"; ".png"; ".bmp"; ".gif"; ".tif"; ".tiff"; ".xpm" ] => Shell.print_image;
+let file_types = 
+    let ( => ) extensions handler = {extensions; handler} in
+    [
+        (* code and text files *)
+        [".xml"; ".sql"; ".ini"; ".csv"; ".cs"; ".yaml"; ".yml"; ".py"; ".rb"; ".lua"; 
+        ".htm"; ".css"; ".html"; ".php"; ".ml"; ".ps"; ".ps1"; ".java"; ".cpp"; ".c"; ".h"; ".ahk"; ".svg";
+        ".tcl"; ".sh"; ".zsh"; ".pl"; ".fs"; ".fsx"; ".js"; ".xsl"; ".sgm"; ".csproj"; ".ent"; ".sgm"; ".vb";
+        ".vbs"; ".txt"; ".tsql"; ".text"; ".sml"; ".bash"; ".rs"; ".qml"; ".mssql"; ".md"; ".go"; ".bat"; "fstab"; 
+        ".zshrc"; ".bashrc"; ".profile"; "profile"; "xprofile"; ".xinitrc"; ".json"; ".desktop"]
+        => (fun file pos ->  Shell.run_print (Printf.sprintf "highlight -WJ %s -O ansi %s" pos.width file));
+
+        (* image files *)
+        [ ".jpg"; ".jpeg"; ".png"; ".bmp"; ".gif"; ".tif"; ".tiff"; ".xpm" ] 
+        => Shell.print_image;
+
+        (* audio files *)
+        [ ".aif"; ".cda"; ".mid"; ".midi"; ".mp3"; ".mpa"; ".ogg"; ".wav"; ".wma"; ".wpl"; ".wmv" ]
+        => (fun file _ -> Shell.run_print ("exiftool " ^ file));
 
 
-    (* audio files *)
-    [ ".aif"; ".cda"; ".mid"; ".midi"; ".mp3"; ".mpa"; ".ogg"; ".wav"; ".wma"; ".wpl"; ".wmv" ]
-    => (fun file _ -> Shell.run_print ("exiftool " ^ file));
+        (* video files *)
+        [ ".mp4"; ".webm"; ".mkv"; ".avi"; ".mpeg"; ".vob"; ".fl"; ".m2v"; ".mov"; ".m4w"; ".divx" ]
+        => (fun file position -> 
+                let cache_file = "/dev/shm/" ^ file in
+                match (Shell.run (Printf.sprintf "ffmpegthumbnailer -i %s -o %s -s 1024" file cache_file)) with
+                | Ok _ -> Shell.print_image cache_file position
+                | _ ->  Error(Printf.sprintf "Error: couldn't create thumbnail from video: \"%s\"" file)
+            );
 
+        (* windows binary files *)
+        [ ".exe"; ".msi"; ".dll";] => (fun _ _ -> Shell.run_print "Windows binary file");
 
-    (* video files *)
-    [ ".mp4"; ".webm"; ".mkv"; ".avi"; ".mpeg"; ".vob"; ".fl"; ".m2v"; ".mov"; ".m4w"; ".divx" ]
-    => (fun file position -> 
-            let cache_file = "/dev/shm/" ^ file in
-            match (Shell.run (Printf.sprintf "ffmpegthumbnailer -i %s -o %s -s 1024" file cache_file)) with
-            | Ok _ -> Shell.print_image cache_file position
-            | _ ->  Error(Printf.sprintf "Error: couldn't create thumbnail from video: \"%s\"" file)
-        );
+        (* document files *)
+        [".docx"] => (fun file _ -> Shell.run_print  (Printf.sprintf "docx2txt %s -" file)); 
+        [".doc"] => (fun file _ -> Shell.run_print ("catdoc " ^ file));
+        [".odt"; ".ods"; ".odp"; ".sxw"] =>  (fun file _ -> Shell.run_print ( "odt2txt " ^ file));
 
-    (* windows binary files *)
-    [ ".exe"; ".msi"; ".dll";] => (fun _ _ -> Shell.run_print "Windows binary file");
-
-    (* document files *)
-    [".docx"] => (fun file _ -> Shell.run_print  (Printf.sprintf "docx2txt %s -" file)); 
-    [".doc"] => (fun file _ -> Shell.run_print ("catdoc " ^ file));
-    [".odt"; ".ods"; ".odp"; ".sxw"] =>  (fun file _ -> Shell.run_print ( "odt2txt " ^ file));
-
-    (* archive files *)
-    [".iso"] => (fun file _ -> Shell.run_print ("iso-info --no-header -l " ^ file));
-    [ ".txz"; ] => (fun file _ -> Shell.run_print ("tar tjf " ^ file)); 
-    [ ".tar"; ] => (fun file _ -> Shell.run_print ("tar tf " ^ file)); 
-    [ ".tgz"; ".gz" ] => (fun file _ -> Shell.run_print ("tar tzf " ^ file)); 
-    [ ".zip"; ".jar"; ".war"; ".ear"; ".oxt"; ] => (fun file _ -> Shell.run_print ("unzip -l " ^ file));
-    
-]
+        (* archive files *)
+        [".iso"] => (fun file _ -> Shell.run_print ("iso-info --no-header -l " ^ file));
+        [ ".txz"; ] => (fun file _ -> Shell.run_print ("tar tjf " ^ file)); 
+        [ ".tar"; ] => (fun file _ -> Shell.run_print ("tar tf " ^ file)); 
+        [ ".tgz"; ".gz" ] => (fun file _ -> Shell.run_print ("tar tzf " ^ file)); 
+        [ ".zip"; ".jar"; ".war"; ".ear"; ".oxt"; ] => (fun file _ -> Shell.run_print ("unzip -l " ^ file));
+    ]
 
 
 let extension_test filename result = 
     let file_ext = match Filename.extension filename with | "" -> filename | v -> v in
-    print_string (filename ^ ":" ^ file_ext);
+    (* print_string (filename ^ ":" ^ file_ext); *)  
     let rec run_all_tests all_extension_lists = 
         match all_extension_lists with
         | [] -> Unresolved
@@ -155,9 +157,6 @@ let extension_test filename result =
 let file_cmd_test filename result = 
     Shell.run ("file " ^ filename) |> ignore; 
     Unresolved
-
-
-let ( |>> ) x f = match x with | Unresolved -> f x | _ -> x 
 
 let validate_args file pos result =
     let p = Printf.sprintf in
@@ -180,14 +179,14 @@ let validate_args file pos result =
     
 
 let preview () = 
-    let file = Sys.argv.(1) in 
+    let file = Printf.sprintf ("%s") Sys.argv.(1) in 
     let print_position = { 
         width = Sys.argv.(2);
         height = Sys.argv.(3);
         left = Sys.argv.(4);
         top = Sys.argv.(5);
     } in
-
+    let ( |>> ) x f = match x with | Unresolved -> f x | _ -> x in
     let result = 
         Unresolved
         |>> validate_args file print_position
@@ -196,13 +195,13 @@ let preview () =
     in
     begin
         match result with
-        | Matched file_type -> file_type.handler file print_position |> ignore; 0
+        | Matched file_type -> file_type.handler (Printf.sprintf "\"%s\"" file) print_position |> ignore; 1
         | Unresolved -> print_string "No handler found for this file type."; 0
         | Fatal m -> print_string ("An error has occured while creating the preview: \n" ^ m); 1
     end
 
 let clean_up () = 
-    match Unix.system "kitty +kitten icat --clear" with
+    match Unix.system "kitty +icat --clear --silent --transfer-mode file" with
     | WEXITED code 
     | WSIGNALED code 
     | WSTOPPED code-> code
@@ -211,7 +210,7 @@ let clean_up () =
 let () =
     begin 
         match Array.length Sys.argv with
-        | 6 -> preview ()
-        | 2 -> clean_up ()
-        | _ -> print_string "Error Invalid number of arguments"; 1
+        | 6 -> preview (); 
+        | 7 -> clean_up ()
+        | _ -> clean_up () |> ignore; print_string "Error Invalid number of arguments"; 1
     end |> exit
