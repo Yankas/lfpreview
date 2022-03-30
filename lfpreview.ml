@@ -210,7 +210,7 @@ let clean_up () =
 let () =
     begin 
         match Array.length Sys.argv with
-        | 6 -> preview (); 
-        | 7 -> clean_up ()
-        | _ -> clean_up () |> ignore; print_string "Error Invalid number of arguments"; 1
+        | 6 -> preview ()
+        | 2 -> clean_up ()
+        | _ -> print_string "Error Invalid number of arguments"; 1
     end |> exit
