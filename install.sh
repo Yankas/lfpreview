@@ -1,4 +1,4 @@
-#!/usr/bin/sh
+#!/usr/bin/env sh
 rm -rf build
 mkdir build \
 && ocamlopt -color auto -o $HOME/.local/bin/lfpreview unix.cmxa lfpreview.ml \
