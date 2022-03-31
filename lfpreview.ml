@@ -20,6 +20,7 @@ docx2txt - for MS Word docx Preview
 odt2txt - for OpenDocument (ODT) preview
 perl-image-exiftool - Command exiftool for audio metadata preview
 catdoc - Preview for .doc files 
+poppler - Contains 'pdftoppm' command needed to converting PDFs to images.
 
 * LF documentation
 https://pkg.go.dev/github.com/gokcehan/lf#hdr-Configuration
@@ -36,6 +37,18 @@ type file_match_result =
 | Unresolved
 | Fatal of string
 
+let sprintf = Printf.sprintf
+
+let cache_location ()  =
+    match Sys.file_exists "/dev/shm" with | true -> "/dev/shm"| false -> "/tmp/"
+let cache_path_for file_name = (cache_location ()) ^ (Filename.basename file_name)
+
+let create_cache_file filename command = 
+    let cache_location = match Sys.file_exists "/dev/shm" with | true -> "/dev/shm"| false -> "/tmp/" in
+    let cache_file = cache_location ^ (Filename.basename filename) in
+    match command cache_file with
+    | Ok _ -> Ok(cache_file)
+    | Error name -> Error (name ^ "\n" ^ "create_cache_file() failed")
 module Shell = struct
     (** [has_cmd cmd] uses the unix builtin "command" to check if the command [cmd] is available on the system. *)
     let has_cmd cmd = match Unix.system ("command " ^ cmd) with | WEXITED 0 -> true | _ -> false 
@@ -62,19 +75,13 @@ module Shell = struct
         (List.rev !lines)
         |> String.concat "\n"
 
-    (** [run_cmd fmt] runs the command specified by [fmt] using the same syntax as Prinft.sprintf
-        example: run_cmd "ls %s %s" "-las" "/usr/bin" *)    
-    let run_cmd fmt = 
-        let do_run str =  Unix.system str |> ignore in 
-        Printf.ksprintf do_run fmt
-
     (** [print_image] prints the image file [file] in the terminal with the size and position given by [position]
         using a compatible terminal or terminal overlay if possible. *)
     let print_image filename pos =
         match Sys.getenv_opt "TERM" with
         | Some "xterm-kitty" ->
             begin
-                match run (Printf.sprintf "kitty +icat --silent --transfer-mode file --place %sx%s@%sx%s %s" pos.width pos.height pos.left pos.top filename) with
+                match run (Printf.sprintf "kitty +icat --silent --transfer-mode file --place %sx%s@%sx%s \"%s\"" pos.width pos.height pos.left pos.top filename) with
                 (*match run (Printf.sprintf "kitty +kitten icat --place %sx%s@%sx%s %s" pos.width pos.height pos.left pos.top filename) with *)
                 | Error _ -> Error(Printf.sprintf "Couldn't print image file `%s` to terminal" filename)
                 | s -> Ok(1)
@@ -94,7 +101,7 @@ let file_types =
         ".tcl"; ".sh"; ".zsh"; ".pl"; ".fs"; ".fsx"; ".js"; ".xsl"; ".sgm"; ".csproj"; ".ent"; ".sgm"; ".vb";
         ".vbs"; ".txt"; ".tsql"; ".text"; ".sml"; ".bash"; ".rs"; ".qml"; ".mssql"; ".md"; ".go"; ".bat"; "fstab"; 
         ".zshrc"; ".bashrc"; ".profile"; "profile"; "xprofile"; ".xinitrc"; ".json"; ".desktop"]
-        => (fun file pos ->  Shell.run_print (Printf.sprintf "highlight -WJ %s -O ansi %s" pos.width file));
+        => (fun file pos ->  Shell.run_print (sprintf "highlight -WJ %s -O ansi \"%s\"" pos.width file));
 
         (* image files *)
         [ ".jpg"; ".jpeg"; ".png"; ".bmp"; ".gif"; ".tif"; ".tiff"; ".xpm" ] 
@@ -102,31 +109,38 @@ let file_types =
 
         (* audio files *)
         [ ".aif"; ".cda"; ".mid"; ".midi"; ".mp3"; ".mpa"; ".ogg"; ".wav"; ".wma"; ".wpl"; ".wmv" ]
-        => (fun file _ -> Shell.run_print ("exiftool " ^ file));
+        => (fun file _ -> Shell.run_print (sprintf "exiftool \"%s\"" file));
 
 
         (* video files *)
         [ ".mp4"; ".webm"; ".mkv"; ".avi"; ".mpeg"; ".vob"; ".fl"; ".m2v"; ".mov"; ".m4w"; ".divx" ]
         => (fun file position -> 
-                let cache_file = "/dev/shm/" ^ file in
-                match (Shell.run (Printf.sprintf "ffmpegthumbnailer -i %s -o %s -s 1024" file cache_file)) with
+                let cache_file = cache_path_for file in
+                match (Shell.run (sprintf "ffmpegthumbnailer -i \"%s\" -o \"%s\" -s 1024" file cache_file)) with
                 | Ok _ -> Shell.print_image cache_file position
-                | _ ->  Error(Printf.sprintf "Error: couldn't create thumbnail from video: \"%s\"" file)
+                | _ ->  Error(sprintf "Error: couldn't create thumbnail from video: \"%s\"" file)
             );
 
         (* windows binary files *)
         [ ".exe"; ".msi"; ".dll";] => (fun _ _ -> Shell.run_print "Windows binary file");
 
         (* document files *)
-        [".docx"] => (fun file _ -> Shell.run_print  (Printf.sprintf "docx2txt %s -" file)); 
+        [".docx"] => (fun file _ -> Shell.run_print  (Printf.sprintf "docx2txt \"%s\" -" file)); 
         [".doc"] => (fun file _ -> Shell.run_print ("catdoc " ^ file));
         [".odt"; ".ods"; ".odp"; ".sxw"] =>  (fun file _ -> Shell.run_print ( "odt2txt " ^ file));
+        [".pdf"] 
+        => (fun file position -> 
+            let cache_file = cache_path_for file in
+            match (Shell.run (Printf.sprintf "pdftoppm -jpeg -f 1 -singlefile \"%s\" \"%s\"" file cache_file)) with
+            | Ok _ -> Shell.print_image (cache_file ^ ".jpg") position
+            | Error old ->  Error(old ^ Printf.sprintf "Error: couldn't create thumbnail from pdf: \"%s\"" file)
+        );
 
         (* archive files *)
         [".iso"] => (fun file _ -> Shell.run_print ("iso-info --no-header -l " ^ file));
-        [ ".txz"; ] => (fun file _ -> Shell.run_print ("tar tjf " ^ file)); 
-        [ ".tar"; ] => (fun file _ -> Shell.run_print ("tar tf " ^ file)); 
-        [ ".tgz"; ".gz" ] => (fun file _ -> Shell.run_print ("tar tzf " ^ file)); 
+        [ ".txz"; ] => (fun file _ -> Shell.run_print (sprintf "tar tjf \"s\"" ^ file)); 
+        [ ".tar"; ] => (fun file _ -> Shell.run_print (sprintf "tar tf \"%s\"" file)); 
+        [ ".tgz"; ".gz" ] => (fun file _ -> Shell.run_print (sprintf "tar tzf \"%s\"" file)); 
         [ ".zip"; ".jar"; ".war"; ".ear"; ".oxt"; ] => (fun file _ -> Shell.run_print ("unzip -l " ^ file));
     ]
 
@@ -186,7 +200,7 @@ let preview () =
     begin
         match result with
         | Matched file_type -> 
-            (match file_type.handler (Printf.sprintf "\"%s\"" file) print_position with
+            (match file_type.handler (Printf.sprintf "%s" file) print_position with
             | Ok exit_code -> exit_code
             | _ -> 0)
         | Unresolved -> print_string "No handler found for this file type."; 0
