@@ -32,6 +32,7 @@ type file_type = {
     extensions : string list;
     handler : string -> position -> (int, string) result
 }
+
 type file_match_result =
 | Matched of file_type
 | Unresolved
@@ -78,16 +79,24 @@ module Shell = struct
     (** [print_image] prints the image file [file] in the terminal with the size and position given by [position]
         using a compatible terminal or terminal overlay if possible. *)
     let print_image filename pos =
+        let env name = match Sys.getenv_opt name with | Some n -> n | None -> "" in 
+        if env "TERM" = "xterm-kitty" then
+            match run (Printf.sprintf "kitty +icat --silent --transfer-mode file --place %sx%s@%sx%s \"%s\"" pos.width pos.height pos.left pos.top filename) with
+            | Error _ -> Error(Printf.sprintf "Couldn't print image file `%s` to terminal" filename)
+            | s -> Ok(1)
+        else if env "UEBERZUG" = "blub" then Ok(1)
+        else Error("")
+
+(**
         match Sys.getenv_opt "TERM" with
         | Some "xterm-kitty" ->
             begin
                 match run (Printf.sprintf "kitty +icat --silent --transfer-mode file --place %sx%s@%sx%s \"%s\"" pos.width pos.height pos.left pos.top filename) with
-                (*match run (Printf.sprintf "kitty +kitten icat --place %sx%s@%sx%s %s" pos.width pos.height pos.left pos.top filename) with *)
                 | Error _ -> Error(Printf.sprintf "Couldn't print image file `%s` to terminal" filename)
                 | s -> Ok(1)
             end
-        | None | Some _ -> Error("Couldn't display image $TERM is not set")
-         
+        | _ -> Error("Couldn't display image $TERM is not set")
+         **)
     let run_print cmd = print_string (run_read cmd); Ok(0)
 end
 
@@ -116,24 +125,36 @@ let file_types =
         [ ".mp4"; ".webm"; ".mkv"; ".avi"; ".mpeg"; ".vob"; ".fl"; ".m2v"; ".mov"; ".m4w"; ".divx" ]
         => (fun file position -> 
                 let cache_file = cache_path_for file in
+                if Sys.file_exists cache_file then
+                    Shell.print_image cache_file position
+                else 
                 match (Shell.run (sprintf "ffmpegthumbnailer -i \"%s\" -o \"%s\" -s 1024" file cache_file)) with
                 | Ok _ -> Shell.print_image cache_file position
                 | _ ->  Error(sprintf "Error: couldn't create thumbnail from video: \"%s\"" file)
             );
 
         (* windows binary files *)
-        [ ".exe"; ".msi"; ".dll";] => (fun _ _ -> Shell.run_print "Windows binary file");
+        [ ".exe"; ".msi"; ".dll";] 
+        => (fun _ _ -> Shell.run_print "Windows binary file");
 
         (* document files *)
-        [".docx"] => (fun file _ -> Shell.run_print  (Printf.sprintf "docx2txt \"%s\" -" file)); 
-        [".doc"] => (fun file _ -> Shell.run_print ("catdoc " ^ file));
-        [".odt"; ".ods"; ".odp"; ".sxw"] =>  (fun file _ -> Shell.run_print ( "odt2txt " ^ file));
+        [".docx"] 
+        => (fun file _ -> Shell.run_print  (Printf.sprintf "docx2txt \"%s\" -" file)); 
+        [".doc"] 
+        => (fun file _ -> Shell.run_print ("catdoc " ^ file));
+        [".odt"; ".ods"; ".odp"; ".sxw"] 
+        =>  (fun file _ -> Shell.run_print ( "odt2txt " ^ file));
         [".pdf"] 
         => (fun file position -> 
             let cache_file = cache_path_for file in
-            match (Shell.run (Printf.sprintf "pdftoppm -jpeg -f 1 -singlefile \"%s\" \"%s\"" file cache_file)) with
-            | Ok _ -> Shell.print_image (cache_file ^ ".jpg") position
-            | Error old ->  Error(old ^ Printf.sprintf "Error: couldn't create thumbnail from pdf: \"%s\"" file)
+            if Sys.file_exists (cache_file) then
+                Shell.print_image (cache_file ^ ".jpg") position
+            else 
+                begin      
+                    match (Shell.run (Printf.sprintf "pdftoppm -jpeg -f 1 -singlefile \"%s\" \"%s\"" file cache_file)) with
+                    | Ok _ -> Shell.print_image (cache_file ^ ".jpg") position
+                    | Error old ->  Error(old ^ Printf.sprintf "Error: couldn't create thumbnail from pdf: \"%s\"" file)
+            end
         );
 
         (* archive files *)
