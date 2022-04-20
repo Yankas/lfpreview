@@ -27,14 +27,17 @@ https://pkg.go.dev/github.com/gokcehan/lf#hdr-Configuration
 *)
 
 
-type position = {  width : string; height: string; left: string; top: string }
+
+type position = {  width : string; height: string; left: string; top: string  }
 type file_type = { 
     extensions : string list;
     handler : string -> position -> (int, string) result
 }
+type mime_info = { main: string; sub: string; parameter: string option }
+type file_handler = (string -> position -> (int, string) result)
 
 type file_match_result =
-| Matched of file_type
+| Matched of file_handler
 | Unresolved
 | Fatal of string
 
@@ -97,9 +100,12 @@ module Shell = struct
             end
         | _ -> Error("Couldn't display image $TERM is not set")
          **)
-    let run_print cmd = print_string (run_read cmd); Ok(0)
+    let run_print cmd : (int, string) result = print_string (run_read cmd); Ok(0)
 end
 
+module Handlers = struct
+    let highlight_code file pos = Shell.run_print (sprintf "highlight -WJ %s -O ansi \"%s\"" pos.width file)
+end
 
 let file_types = 
     let ( => ) extensions handler = {extensions; handler} in
@@ -110,7 +116,7 @@ let file_types =
         ".tcl"; ".sh"; ".zsh"; ".pl"; ".fs"; ".fsx"; ".js"; ".xsl"; ".sgm"; ".csproj"; ".ent"; ".sgm"; ".vb";
         ".vbs"; ".txt"; ".tsql"; ".text"; ".sml"; ".bash"; ".rs"; ".qml"; ".mssql"; ".md"; ".go"; ".bat"; "fstab"; 
         ".zshrc"; ".bashrc"; ".profile"; "profile"; "xprofile"; ".xinitrc"; ".json"; ".desktop"]
-        => (fun file pos ->  Shell.run_print (sprintf "highlight -WJ %s -O ansi \"%s\"" pos.width file));
+        => Handlers.highlight_code;
 
         (* image files *)
         [ ".jpg"; ".jpeg"; ".png"; ".bmp"; ".gif"; ".tif"; ".tiff"; ".xpm" ] 
@@ -165,6 +171,15 @@ let file_types =
         [ ".zip"; ".jar"; ".war"; ".ear"; ".oxt"; ] => (fun file _ -> Shell.run_print ("unzip -l " ^ file));
     ]
 
+let mime_handler mime_info result = 
+    match mime_info with
+    | { main = "text"; _ } -> Matched(Handlers.highlight_code)
+    | { sub = "empty"; _ } | { sub = "x-empty"; _ } 
+        -> Matched(fun file pos -> Printf.printf "Empty file"; Ok(0))
+    | { main = x; sub = y; _ } 
+        -> Matched(fun file pos -> Printf.printf "%s/%s" x y; Ok(0))
+    
+
 
 let extension_test filename result = 
     let file_ext = match Filename.extension filename with | "" -> filename | v -> v in
@@ -174,14 +189,25 @@ let extension_test filename result =
         | [] -> Unresolved
         | head::tail -> (match (List.find_opt (fun e -> file_ext = e) (head.extensions)) with
             | None -> run_all_tests tail
-            | _ -> Matched(head)) in
-    
+            | _ -> Matched(head.handler)) in
     file_types
     |> run_all_tests
 
-let file_cmd_test filename result = 
-    Shell.run ("file " ^ filename) |> ignore; 
-    Unresolved
+let mime_test filename result =
+    let mime_type file = 
+        let full_name = Shell.run_read (Printf.sprintf "file --mime-type -b \"%s\"" file) in
+        let length = String.length full_name in
+        let seperator_pos = String.index_from full_name 0 '/' in
+        let primary = String.sub full_name 0 seperator_pos in
+        let param_seperator_pos = 
+            match String.index_from_opt full_name seperator_pos ';' with 
+            | Some x -> x 
+            | None -> length
+        in
+        let secondary = String.sub full_name (seperator_pos + 1) (param_seperator_pos - seperator_pos - 1) in
+        { main = primary; sub = secondary; parameter = None }  
+    in 
+    mime_handler (mime_type filename) filename
 
 let validate_args file pos result =
     let p = Printf.sprintf in
@@ -216,12 +242,12 @@ let preview () =
         Unresolved
         |>> validate_args file print_position
         |>> extension_test file
-        |>> file_cmd_test file 
+        |>> mime_test file
     in
     begin
         match result with
-        | Matched file_type -> 
-            (match file_type.handler (Printf.sprintf "%s" file) print_position with
+        | Matched handler -> 
+            (match handler (Printf.sprintf "%s" file) print_position with
             | Ok exit_code -> exit_code
             | _ -> 0)
         | Unresolved -> print_string "No handler found for this file type."; 0
