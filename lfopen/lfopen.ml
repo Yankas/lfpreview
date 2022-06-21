@@ -29,6 +29,7 @@ poppler - Contains 'pdftoppm' command needed to converting PDFs to images.
 * LF documentation
 https://pkg.go.dev/github.com/gokcehan/lf#hdr-Configuration
 *)
+open Rules
 
 type position = {  width : string; height: string; left: string; top: string  }
 type mime_info = { main: string; sub: string; parameter: string option }
@@ -45,7 +46,6 @@ type file_match_result =
 
 let sprintf = Printf.sprintf 
 let printf = Printf.printf
-
 module Shell = struct
     (** [has_cmd cmd] uses the unix builtin "command" to check if the command [cmd] is available on the system. *)
     let has_cmd cmd = match Unix.system (sprintf "command -v %s &> /dev/null" cmd) with | WEXITED 0 -> true | _ -> false 
@@ -80,9 +80,8 @@ module Shell = struct
         let env name = match Sys.getenv_opt name with | Some n -> n | None -> "" in 
         if env "TERM" = "xterm-kitty" then
             match run "kitty" ["+icat"; "--silent"; "--transfer-mode"; "file"; "--place"; (sprintf "%sx%s@%sx%s" pos.width pos.height pos.left pos.top); filename ] with 
-            (**run (sprintf "kitty +icat --silent --transfer-mode file --place %sx%s@%sx%s %s" pos.width pos.height pos.left pos.top (Filename.quote filename)) with
-            *)| Error _ -> Error(sprintf "Couldn't print image file `%s` to terminal" filename)
-            | s -> Ok(1)
+            | Error _ -> Error(sprintf "Couldn't print image file `%s` to terminal" filename)
+            | _ -> Ok(1)
         else if env "UEBERZUG" = "blub" then Ok(1)
         else Error("")
     let run_print cmd args : (int, string) result = print (run_read cmd args)
@@ -102,6 +101,7 @@ module Shell = struct
 end
 module Cache = struct
     let location = match Sys.file_exists "/dev/shm" with | true -> "/dev/shm/"| false -> "/tmp/"
+    
     (** [for_file] returns the appropriate unique cache path for a [file] by hashing the file's name.*)
     let for_file file = location ^ (Digest.string file |> Digest.to_hex)
     let exists file = for_file file |> Sys.file_exists 
@@ -114,9 +114,8 @@ module Cache = struct
 end
 module Handlers = struct
     let highlight_code file pos =  Shell.run_print "highlight" [ "-W"; "-J"; pos.width; "-O"; "ansi"; file.path ]
-        (** Shell.run_print (sprintf "highlight -WJ %s -O ansi \"%s\"" pos.width file.path) *)
-    let do_nothing (file) (pos : position) = Shell.print ("Not implemented for file" ^ (Filename.quote file.path))
-    let xdg_open file pos = Shell.run "xdg_open" [file.path]
+    let do_nothing (file) (_ : position) = Shell.print ("Not implemented for file" ^ (Filename.quote file.path))
+    let xdg_open file _ = Shell.run "xdg_open" [file.path]
     let print_image file pos = Shell.print_image file.path pos
 end
 let if_ext ext action = { condition = Extension ext; action = action } 
@@ -179,11 +178,11 @@ let rules_preview =
     if_ext [ ".zip"; ".jar"; ".war"; ".ear"; ".oxt"; ] (fun file _ -> Shell.run_print "unzip" ["-l"; file.path]);
 
     if_mime 
-        (fun { main = main; sub = sub } -> sub = "empty" || sub = "x-empty") 
+        (fun {sub = sub; _ } -> sub = "empty" || sub = "x-empty") 
         (fun _ _ -> Shell.print "EMPTY FILE");
     
     if_mime 
-        (fun { main = main } -> main = "text")
+        (fun { main = main; _ } -> main = "text")
         Handlers.highlight_code
 ]
 
@@ -211,7 +210,7 @@ let validate_args file pos result =
     | None -> Unresolved
     | Some err -> match result with | Fatal old_err -> Fatal(old_err ^ "\n" ^ err) | _ -> Fatal(err)
 
-let rec evaluate_rules rules file result = 
+let rec evaluate_rules rules file = 
     let evaluate_rule rule file = 
         let file_ext = match Filename.extension file.path with | "" -> file.path | v -> v in
         match rule.condition with
@@ -230,17 +229,17 @@ let rec evaluate_rules rules file result =
             match evaluate_rule head file with
             | Matched result -> Matched(result) 
             | Fatal old -> Fatal ("ERROR: rule could not be matched.\n" ^ old)
-            | Unresolved -> evaluate_rules tail file Unresolved 
+            | Unresolved -> evaluate_rules tail file 
         end
 
 let run_handler file print_position rules = 
-    match evaluate_rules rules file Unresolved  with
+    match evaluate_rules rules file with
     | Matched handler -> 
         (match handler file print_position with
         | Ok exit_code -> exit_code
         | _ -> 0)
-    | Unresolved -> print_string "ERROR: No handler found for this type of file."; 0
-    | Fatal m -> print_string ("An error has occured while running the file handler: \n" ^ m); 0
+    | Unresolved -> print_string "ERROR:\nNo handler found for this type of file."; 0
+    | Fatal m -> print_string ("ERROR:\nAn error has occured while running the file handler:\n " ^ m); 0
 
 let check_dependencies () =
     let cmd_exists cmd = 
@@ -249,7 +248,7 @@ let check_dependencies () =
         print_endline (cmd ^ if Shell.has_cmd cmd then check_mark else x_mark) in
     let rec check_cmds tools = match tools with | [] -> () | h::t -> cmd_exists h; check_cmds t in
     
-    ["highlight"; "kitty"; "ffmpegthumbnailer"; "iso-info" (** libcdio *); "docx2txt"; "odt2txt"; "exiftool"; "catdoc"; "pdftoppm"]
+    ["highlight"; "kitty"; "ffmpegthumbnailer"; "iso-info" (* libcdio *); "docx2txt"; "odt2txt"; "exiftool"; "catdoc"; "pdftoppm"]
     |> check_cmds 
     |> ignore;
     0

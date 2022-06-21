@@ -1,0 +1,2 @@
+dune build
+\cp _build/default/lfopen.exe $HOME/.local/bin/lfopen

@@ -1,0 +1,6 @@
+(executable
+  (name lfopen)
+  (libraries unix)
+  (modes (native exe))
+)
+
