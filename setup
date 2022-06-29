@@ -1,2 +1,4 @@
 dune build
+
+\cp _build/defualt/statusbar.exe $HOME/.local/bin/statusbar
 \cp _build/default/lfopen.exe $HOME/.local/bin/lfopen

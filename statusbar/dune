@@ -1,0 +1,6 @@
+(executable
+  (name statusbar)
+  (libraries unix str)
+  (modes (native exe))
+)
+

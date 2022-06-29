@@ -29,7 +29,6 @@ poppler - Contains 'pdftoppm' command needed to converting PDFs to images.
 * LF documentation
 https://pkg.go.dev/github.com/gokcehan/lf#hdr-Configuration
 *)
-open Rules
 
 type position = {  width : string; height: string; left: string; top: string  }
 type mime_info = { main: string; sub: string; parameter: string option }
