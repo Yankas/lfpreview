@@ -1,7 +1,7 @@
 *.mkv
 *.jpg
 *.png
-
+.DS_Store
 
 *.annot
 *.cmo
