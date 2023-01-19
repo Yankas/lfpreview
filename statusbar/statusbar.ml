@@ -13,10 +13,10 @@ let run_read_lines prog : (string list, string) result =
     end;    
     Ok(List.rev !lines)
 
-let run_read prog result = 
+let run_read prog = 
     match run_read_lines prog with
     | Ok l -> Ok(String.concat "\n" l)
-    | Error x -> Error("ERROR: command '" ^ prog ^ "' failed.")
+    | Error _ -> Error("ERROR: command '" ^ prog ^ "' failed.")
 
 let regex_first_capture regex str = 
     let regexp = Str.regexp regex in
@@ -34,6 +34,12 @@ let try_command cmd handler =
     match cmd with | Ok a -> handler a | Error _ -> "ERR"
 
 let on event_match action event  = if event = event_match then action |> ignore  
+(*
+let toggleProcess processName = 
+    if(p)
+    Unix.system processName |> ignore;
+    Unix.system ("killall " ^ processName)
+*)
 
 (************************
     Widget Implementation

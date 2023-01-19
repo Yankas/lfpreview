@@ -1,0 +1,6 @@
+(executable
+  (name mkscript)
+  (libraries unix)
+  (modes (native exe))
+)
+
