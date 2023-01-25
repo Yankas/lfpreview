@@ -100,6 +100,7 @@ let opt_list =
     ]
 
 let create_file file_name is_executable content =
+    try
     let perms = if is_executable then 0o774 else 0o664 in
     let oc = open_out_gen [Open_creat] perms file_name in
     Printf.fprintf oc "%s" content
@@ -151,17 +152,10 @@ let () =
         match validate_args () with
         | Ok(file_name, file_extension) -> 
             (match f_type file_extension with 
-            | Some(ftype) -> Ok("")
+            | Some(ftype) -> create_file file_name ftype.executable ftype.skeleton
             | None -> Error("Could not determine file type from extension."))
         | Error(_) as err -> err
     in
-
-
-    match f_type with
-    | Some f -> 
-        create_file name f.executable f.skeleton
-    | None -> 
-        failwith "Filetype could not be determined."
     
 
 
